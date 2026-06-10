@@ -51,6 +51,30 @@ compressionStream.SetParameter(ZSTD_cParameter.ZSTD_c_nbWorkers, Environment.Pro
 input.CopyTo(compressionStream);
 ```
 
+Delta compression ("patch-from", like `zstd --patch-from`) — compress a new version of the data
+against the previous version referenced as a prefix (`ZSTD_CCtx_refPrefix`). The prefix applies
+to the next frame only; reference it again before each frame:
+```c#
+// windowLog must cover prefix + input
+var windowLog = 10;
+while (windowLog < 31 && (1L << windowLog) < (long)oldVersion.Length + newVersion.Length)
+    windowLog++;
+
+using var compressor = new Compressor(level);
+compressor.SetParameter(ZSTD_cParameter.ZSTD_c_enableLongDistanceMatching, 1);
+compressor.SetParameter(ZSTD_cParameter.ZSTD_c_windowLog, windowLog);
+compressor.RefPrefix(oldVersion);
+var delta = compressor.Wrap(newVersion);
+
+using var decompressor = new Decompressor();
+decompressor.SetParameter(ZSTD_dParameter.ZSTD_d_windowLogMax, windowLog);
+decompressor.RefPrefix(oldVersion);
+var restored = decompressor.Unwrap(delta);
+```
+Note: prefer `RefPrefix` over `LoadDictionary` for delta compression. `LoadDictionary` builds a
+CDict whose effectiveness degrades for reference contents larger than ~32-64 MB (inherited zstd
+behavior), while a prefix is indexed with the context parameters and has no such limit.
+
 
 # Benchmark
 
